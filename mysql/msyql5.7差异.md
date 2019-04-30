@@ -1,0 +1,1 @@
+* mysql 5.7 distinct、group by同时使用时group by字段必须在select中，同样limit和group by搭配使用也会出错。在不修改sql语句下修复方式在配置文件添加 sql_mode=NO_ENGINE_SUBSTITUTION,STRICT_TRANS_TABLES
