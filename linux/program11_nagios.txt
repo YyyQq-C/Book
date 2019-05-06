@@ -1,0 +1,919 @@
+--
+
+
+监控
+
+开源的监控软件	--使用snmp协议  (simple network manage protocol)
+
+mrtg
+ntop
+cacti		http://www.cacti.net/
+
+nagios
+zabbix
+Ganglia
+centreon
+
+
+nagios
+www.nagios.org
+
+
+--官档路径
+http://nagios.sourceforge.net/docs/nagioscore/4/en/toc.html
+--或者安装主程序包完全后，会在下面这个目录找到
+# ls /usr/local/nagios/share/docs/
+
+
+
+	监控大量机器上运行的服务和负载等，带报警功能。
+
+[root@li ~]# ls 笔记目录/program/nagios_soft/
+nagios-4.0.5.tar.gz           		--主程序包	
+nagios-plugins-2.0.3.tar.gz		--插件包，监控命令包
+nrpe-2.12.tar.gz			--linux客户端私有服务的远程监控包
+
+--注意插件包等和主程序包的版本号不一定要一致
+
+
+
+1，搭建rpm版lamp(源码版lamp也可以，但nginx不行，因为后面nagios的web子配置文件里的语法都是apache的语法)
+# yum install httpd* gd  php*
+
+
+
+2,建立用户
+
+# useradd nagios
+# groupadd nagiosgroup
+# usermod -G nagiosgroup nagios
+# usermod -G nagiosgroup apache      --也就是说你的web服务器由哪个用户跑，就把哪个用户也加到这个组
+ 
+
+3，安装nagios主程序包
+
+# tar xf nagios-4.0.5.tar.gz -C /usr/src/
+# cd /usr/src/nagios-4.0.5/
+
+# ./configure --with-nagios-user=nagios --with-nagios-group=nagiosgroup 
+
+# make all		
+# make install		--安装主程序，CGI脚本和web网页文件
+# make install-init		--安装服务脚本/etc/init.d/nagios
+# make install-commandmode	--修改一些相应的目录权限
+# make install-config		--安装/usr/local/nagios/etc这个目录（包含配置文件模版）
+# make install-webconf		--安装/etc/httpd/conf.d/nagios.conf子配置文件
+# make install-exfoliation	--安装exfoliation主题（也就是web皮肤和样式），会覆盖其它主题
+# make install-classicui	--安装classicui主题，会覆盖其它主题
+
+
+ make install
+     - This installs the main program, CGIs, and HTML files
+
+  make install-init
+     - This installs the init script in /etc/rc.d/init.d
+
+  make install-commandmode
+     - This installs and configures permissions on the
+       directory for holding the external command file
+
+  make install-config
+     - This installs *SAMPLE* config files in /usr/local/nagios/etc
+       You'll have to modify these sample files before you can
+       use Nagios.  Read the HTML documentation for more info
+       on doing this.  Pay particular attention to the docs on
+       object configuration files, as they determine what/how
+       things get monitored!
+
+  make install-webconf
+     - This installs the Apache config file for the Nagios
+       web interface
+
+  make install-exfoliation
+     - This installs the Exfoliation theme for the Nagios
+       web interface
+
+  make install-classicui
+     - This installs the classic theme for the Nagios
+       web interface
+
+
+
+
+# ls /usr/local/nagios/
+bin  etc  libexec  sbin  share  var
+
+--libexec目录为空，需要安装插件包才会有很多命令与脚本
+
+
+4,安装nagios插件包 	--包含用于收集数据的程序，命令，脚本等
+# tar xf nagios-plugins-2.0.3.tar.gz -C /usr/src/
+# cd /usr/src/nagios-plugins-2.0.3/
+
+# ./configure --with-nagios-user=nagios --with-nagios-group=nagiosgroup 
+
+# make ;make install
+
+
+
+5。创建web界面可访问的验证用户
+/etc/httpd/conf.d/nagios.conf 	--在这个文件里已经配置了nagios的apache验证，所以我们要把用户给创建出来
+
+# htpasswd -c /usr/local/nagios/etc/htpasswd.users nagiosadmin	--这里注意一下，用户名一定要用nagiosadmin，如果你用其它自定义的用户名，可以通过apache的验证，但是查看nagios数据时，会没有权限查看到数据
+New password: 
+Re-type new password: 
+Adding password for user nagiosadmin
+
+
+# /usr/local/nagios/bin/nagios -v /usr/local/nagios/etc/nagios.cfg 
+--检测nagios配置文件正确性
+
+
+
+/etc/init.d/nagios restart
+/etc/init.d/httpd restart
+
+--selinux关闭，否则可能造成图形看不到信息
+
+
+
+6，nagios配置文件介绍
+
+
+/usr/local/nagios/etc/nagios.cfg	--主配置文件
+
+/usr/local/nagios/etc/objects/		--子配置文件的目录
+		localhost.cfg		--一个示例模版，默认定义了监控本机的8个服务
+		templates.cfg		--模版定义文件
+		commands.cfg		--命令定义文件
+		contacts.cfg		--定义通知方式的文件
+		timeperiods.cfg		--监控时间段定义文件
+
+
+
+==================================================
+
+
+
+
+关于nagios配置文件之间的联系讲解示例
+
+# vim /usr/local/nagios/etc/nagios.cfg	
+cfg_file=/usr/local/nagios/etc/objects/localhost.cfg
+
+
+		
+
+# vim /usr/local/nagios/etc/objects/localhost.cfg 
+
+
+define host{
+        use                     linux-server	  --模版
+        host_name               localhost	  --主机名	
+        alias                   localhost	  --主机别名	
+        address                 127.0.0.1	  --被监控机器的IP
+        }
+
+
+define hostgroup{
+        hostgroup_name  linux-servers 
+        alias           Linux Servers 
+        members         localhost    --linux Servers组现在只有localhost这一个成员 
+        }
+
+
+--下面是8个默认定义的服务，我以监控磁盘利用率的这一段为例
+define service{
+        use                             local-service    --模版，在templates.cfg 里定义的    
+        host_name                       localhost	--主机名，调用的是同配置文件里define host里定义的host_name
+        service_description             Root Partition	--描述，会在web界面显示的一个标题
+        check_command                   check_local_disk!20%!10%!/	--检测利用率的命令，free空间小于20%就报警，小于10就critcal警告
+        }
+
+
+
+
+# vim /usr/local/nagios/etc/objects/templates.cfg 
+
+
+define host{
+        name                            linux-server
+	use                             generic-host	--linux主机模版也使用了一个叫generic-host的模版，也在templates.cfg里
+	check_period                    24x7 		--在timeperiods.cfg 里定义的时间段
+	check_interval                  5 
+	retry_interval                  1 
+	max_check_attempts              10 
+	check_command                   check-host-alive  --在commands.cfg 里定义的命令
+	notification_period             workhours	--通知时间在timeperiods.cfg里定义的
+	notification_interval           120		--通知间隔
+	notification_options            d,u,r 		--通知选项
+	contact_groups                  admins		--通知组，在contacts.cfg 里定义
+	register                        0  		--不注册，表示这只是一个模版，被调用，不会被nagios进程认为就是一台主机
+	}
+
+
+
+# vim /usr/local/nagios/etc/objects/commands.cfg
+define command{
+        command_name    check-host-alive
+        command_line    $USER1$/check_ping -H $HOSTADDRESS$ -w 3000.0,80% -c 5000.0,100% -p 5
+        }
+
+--命令都在libexec下，用--help去查
+# /usr/local/nagios/libexec/check_ping --help
+
+
+
+==================================================
+
+
+现在查看web界面，默认只监控了localhost,并监控了其8个服务
+
+一些小操作：
+1，如果http服务为黄色，是警告，则需要把网站家目录里加一个主页进去（家目录为空，他就会警告）。
+但需要等它下一次check才会OK。如果要手动check，可以点http，再右边点Re-schedule the next check of this service去强制check，就OK了
+
+2，默认http和ssh是关闭通知的，是因为在localhost.cfg里这两个服务有一句 notifications_enabled       0。
+也可以手动打开，点进去，再右边点enabled notifications for this service.
+
+
+3，关闭ssh服务，刷新web界面，还是没有critical.
+   点击ssh，可以看到下一次计划的check时间。如果不等的话，在右边点Re-schedule the next check of this service强制check,再刷新就critical
+
+
+
+4,修改ssh的check时间间隔
+# vim /usr/local/nagios/etc/objects/localhost.cfg 
+define service{
+        use                             local-service	--使用的这个模版，所以要去改这个模版里的时间
+        host_name                       localhost
+        service_description             SSH
+        check_command                   check_ssh
+        notifications_enabled           0
+        }
+
+
+
+
+
+# vim /usr/local/nagios/etc/objects/templates.cfg 
+ define service{
+        name                            local-service
+	.............
+ 	normal_check_interval           1 	--把这个五分钟改为1分钟
+	.............
+	}
+
+
+# /etc/init.d/nagios reload
+
+
+--再去web界面验证，check时间为1分钟了
+
+
+========================================================
+
+例1：在默认8个服务的基础上，如何增加监控本机的服务  如ftp
+
+
+思路步骤：
+1，看libexec/下是否有检测ftp的命令，如果没有，网上下载，或自己开发
+2，在localhost.cfg里定义这个服务
+3，在command.cfg里定义命令
+
+
+# vim /usr/local/nagios/etc/objects/localhost.cfg  --加上下面一段
+
+define service{
+        use                             local-service
+        host_name                       localhost
+        service_description             FTP
+        check_command                   check_ftp!1!3
+        }
+
+
+# vim /usr/local/nagios/etc/objects/commands.cfg  --下面一段默认就有，不需要加，直接改一下
+
+define command{
+        command_name    check_ftp
+        command_line    $USER1$/check_ftp -H $HOSTADDRESS$ -w $ARG1$ -c $ARG2$  
+        }
+
+
+# /etc/init.d/nagios restart
+
+
+
+练习：
+1，如果本机ftp服务为监听2121端口，应该如何监控
+
+# vim /etc/vsftpd/vsftpd.conf	
+listen_port=2121		--加上这一句
+
+# /etc/init.d/vsftpd restart
+
+# netstat -ntlup |grep ftp
+tcp        0      0 0.0.0.0:2121                0.0.0.0:*                   LISTEN      29883/vsftpd   
+
+
+
+# vim /usr/local/nagios/etc/objects/localhost.cfg 
+
+---加下面一段
+define service{
+        use                             local-service
+        host_name                       localhost
+        service_description             FTP	--标题改成FTP
+        check_command                   check_ftp_2121!1!3!2121
+--命令我这里是没有的，在command.cfg里默认有一个check_ftp，没有
+--check_ftp_2121这个，所以要手动去加；!为参数分隔符，1是第一个参数，3是第二个参数，2121是第三个参数；它们对应于我下面定义的-w -c  -p
+        }
+
+# vim /usr/local/nagios/etc/objects/commands.cfg 
+
+define command{
+        command_name    check_ftp_2121
+        command_line    $USER1$/check_ftp -H $HOSTADDRESS$ -w $ARG1$ -c $ARG2$ -p $ARG3$
+        }
+
+
+--直接使用监控命令去手工check一下，OK的
+# /usr/local/nagios/libexec/check_ftp -w 1 -c 3 -p 2121
+FTP OK - 0.004 second response time on port 2121 [220-#############################
+220-#]|time=0.00389s;1.000000;3.000000;0.000000;10.000000
+
+
+# /etc/init.d/nagios reload
+--reload后，再去web界面可以看到能监控本机的ftp这个服务了
+
+
+
+2，监控本机的mysql
+
+
+# vim /usr/local/nagios/etc/objects/localhost.cfg 
+
+define service{
+        use                             local-service
+        host_name                       localhost
+        service_description             MYSQL
+        check_command                   check_mysql!root!123
+        }
+
+
+# vim /usr/local/nagios/etc/objects/commands.cfg 
+define command{
+        command_name    check_mysql
+        command_line    $USER1$/check_mysql -H $HOSTADDRESS$ -u $ARG1$ -p $ARG2$	--第一个参数对应上面的root，第二个对应密码123
+        }
+
+
+
+--手动check一下mysql，OK
+# /usr/local/nagios/libexec/check_mysql -u root -p123
+Uptime: 189  Threads: 1  Questions: 5  Slow queries: 0  Opens: 12  Flush tables: 1  Open tables: 6  Queries per second avg: 0.026
+
+
+# /etc/init.d/nagios reload
+
+
+--去nagios 的web界面刷新查看，OK
+
+
+＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝
+
+我们把监控的服务分为公共和私有
+
+公共：如ssh,http,ftp,mysql等。监控本地或远程的公共服务，都可以直接配置
+私有：如load,users,disk usage等。监控本地私有服务直接配置就好，监控远程私有服务，需要服务和被监控端安装nrpe
+
+
+例：监控远程服务器的普通服务（公共服务）。如ssh,http,ftp，mysql等
+
+
+如：我的被监控端IP为10.1.1.6
+1.在nagios服务器的主配置文件里加上6的主机配置文件
+
+# vim /usr/local/nagios/etc/nagios.cfg
+
+cfg_file=/usr/local/nagios/etc/objects/6.cfg
+
+
+2，创建这个6.cfg
+# cd /usr/local/nagios/etc/objects/
+# cp localhost.cfg 6.cfg
+
+# vim 6.cfg
+
+define host{
+        use                     linux-server
+	host_name               10.1.1.6	--主机名，最好/etc/hosts里对应好IP，我这里没有做，就直接写IP
+        alias                   10.1.1.6	--显示到web上的名字
+        address                 10.1.1.6	--实际被监控主机IP
+        }
+
+define hostgroup{
+        hostgroup_name  remote linux-servers	--这里我定义了一个新组，不能和localhost.cfg里的组同名，会冲突
+        alias           remote Linux Servers
+        members         10.1.1.6
+        }
+
+
+
+
+--下面是公共服务，这里我只写了四个，你可以自行增加
+define service{
+        use                             local-service  
+        host_name                       10.1.1.6
+        service_description             PING
+        check_command                   check_ping!100.0,20%!500.0,60%
+        }
+
+
+define service{
+        use                             local-service   
+        host_name                       10.1.1.6
+        service_description             SSH
+        check_command                   check_ssh
+        }
+
+define service{
+        use                             local-service 
+        host_name                       10.1.1.6
+        service_description             HTTP
+        check_command                   check_http
+        }
+
+
+define service{
+        use                             local-service
+        host_name                       10.1.1.6
+        service_description             FTP
+        check_command                   check_ftp!3!6
+        }
+
+
+
+
+--验证配置文件，再重启服务
+# /usr/local/nagios/bin/nagios -v /usr/local/nagios/etc/nagios.cfg
+# /etc/init.d/nagios reload
+
+
+
+==================================================================
+
+
+例:监控远程的私有服务
+
+方法一:snmp协议
+方法二:nrpe程序包
+
+
+	   10.1.1.9		   10.1.1.6	
+	   nagios监控端		   被监控linux
+	   					 check_disk
+	check_nrpe   －－－－－－－－－  check_nrpe  check_swap
+		     SSL或非SSL传输	         check_load等
+
+
+
+1，在nagios服务器上安装nrpe插件
+
+# tar xf nrpe-2.12.tar.gz -C /usr/src/
+# cd /usr/src/nrpe-2.12/
+# ./configure && make && make install
+
+--安装完后，就有下面的命令工具了
+/usr/local/nagios/libexec/check_nrpe
+
+
+
+2，增加check_nrpe命令到commands.conf文件里
+# vim /usr/local/nagios/etc/objects/commands.cfg 
+
+define command{
+        command_name    check_nrpe
+        command_line    $USER1$/check_nrpe -H $HOSTADDRESS$ -c $ARG1$		--c参数后接command， 也就说check_nrpe可以调用别的check命令
+        }
+
+
+
+3，在nagios服务器上对6的配置文件增加远程私有服务
+
+# vim /usr/local/nagios/etc/objects/6.cfg 
+
+define service{
+        use                             local-service 
+        host_name                       10.1.1.6
+        service_description             Root Partition
+        check_command                   check_nrpe!check_remote_root	
+--check_remote_root就是check_nrpe的C参数要调用的命令，此命令在nagios服务器上的commands.cfg里是不存在，它会在后面的步骤中加到被监控端
+        }
+
+
+define service{
+        use                             local-service
+        host_name                       10.1.1.6
+        service_description             Current Users
+        check_command                   check_nrpe!check_remote_users
+        }
+
+
+define service{
+        use                             local-service
+        host_name                       10.1.1.6
+        service_description             Total Processes
+        check_command                   check_nrpe!check_remote_total_procs
+        }
+
+
+define service{
+        use                             local-service
+        host_name                       10.1.1.6
+        service_description             Current Load
+        check_command                   check_nrpe!check_remote_load
+        }
+
+
+define service{
+        use                             local-service
+        host_name                       10.1.1.6
+        service_description             Swap Usage
+        check_command                   check_nrpe!check_remote_swap
+        }
+
+
+
+# /usr/local/nagios/bin/nagios -v /usr/local/nagios/etc/nagios.cfg
+--检查一下配置文件正确性，OK的话则配置端配置完毕，先不reload nagios服务，等被监控端配置完后再reload
+
+
+
+==============================================================
+
+
+现在在被监控端6上安装
+
+1，新建用户
+# useradd nagios
+# groupadd nagiosgroup
+# usermod -G nagiosgroup nagios
+
+
+
+2，安装plugins插件，包含了数据采集命令脚本
+# tar xf nagios-plugins-2.0.3.tar.gz -C /usr/src/
+# cd /usr/src/nagios-plugins-2.0.3/
+# ./configure --with-nagios-user=nagios --with-nagios-group=nagiosgroup
+# make && make install
+
+
+
+3，安装nrpe
+# tar xf nrpe-2.12.tar.gz -C /usr/src/
+# cd /usr/src/nrpe-2.12/
+# ./configure && make && make install
+
+# make install-plugin
+# make install-daemon
+# make install-daemon-config
+# make install-xinetd
+
+
+
+
+4,修改nrpe的超级守护进程的配置文件
+
+# vim /etc/xinetd.d/nrpe 
+
+service nrpe
+{
+        flags           = REUSE
+        socket_type     = stream
+        port            = 5666
+        wait            = no
+        user            = nagios
+        group           = nagios
+        server          = /usr/local/nagios/bin/nrpe
+        server_args     = -c /usr/local/nagios/etc/nrpe.cfg --inetd
+        log_on_failure  += USERID
+        disable         = no
+        only_from       = 127.0.0.1 10.1.1.9	--加上nagios服务器的IP，允许它来访问
+}
+
+
+# vim /etc/services		--最后面加一行
+nrpe            5666/tcp        # NRPE
+
+
+
+5，在nrpe配置文件里定义check命令，使nagios服务能调用
+
+# vim /usr/local/nagios/etc/nrpe.cfg
+
+
+command[check_remote_users]=/usr/local/nagios/libexec/check_users -w 5 -c 10
+command[check_remote_load]=/usr/local/nagios/libexec/check_load -w 15,10,5 -c 30,25,20
+command[check_remote_root]=/usr/local/nagios/libexec/check_disk -w 20% -c 10% -p /dev/sda2     --/dev/sda2是被监控端的根分区，也可以直接就写一个  / 就可以了
+command[check_remote_total_procs]=/usr/local/nagios/libexec/check_procs -w 150 -c 200 
+command[check_remote_swap]=/usr/local/nagios/libexec/check_swap -w 40%% -c 20%% 		--这句默认没有的，但nagios服务器有配置，所以加上这句
+command[check_zombie_procs]=/usr/local/nagios/libexec/check_procs -w 5 -c 10 -s Z		--这个是默认有的，但nagios服务器那边我没有加，所以这个在这里没有用	
+
+# yum install xinetd -y
+
+# /etc/init.d/xinetd restart	--启动超级守护进程
+
+# netstat -ntlup |grep 5666		--有端口被监听了
+tcp        0      0 0.0.0.0:5666                0.0.0.0:*                   LISTEN      22120/xinetd  
+
+
+
+
+6，在本地或nagios服务器测试
+--在被监控端测试成功
+# /usr/local/nagios/libexec/check_users -w 5 -c 10
+USERS OK - 3 users currently logged in |users=3;5;10;0
+
+
+--在nagios服务器上测试成功
+# /usr/local/nagios/libexec/check_nrpe -H 10.1.1.6 -c check_remote_users
+USERS OK - 3 users currently logged in |users=3;5;10;0
+
+
+
+7，回到nagios服务器重启服务
+# /etc/init.d/nagios restart
+
+
+
+===============================================================
+
+
+
+使用免费139邮箱来进行短信通知
+
+
+在https://mail.10086.cn/Register/default.aspx上注册一个邮箱
+
+我的为：
+158xxxxxxxx@139.com
+
+
+登录进去邮箱：
+点设置－－＞邮件到达通知－－＞点开启
+
+
+然后在本机发送一个测试邮件给你的邮箱，会发现手机会马上收到此邮件
+# mail -s 'test' 158xxxxxxxx@139.com	
+
+
+
+# vim /usr/local/nagios/etc/objects/contacts.cfg 
+
+define contact{
+        contact_name                    nagiosadmin      
+        use                             generic-contact     
+        alias                           Nagios Admin           
+        email                           158xxxxxxxx@139.com    --改成收的邮件地址
+        }
+
+
+# /etc/init.d/nagios restart
+
+
+--然后就把几个服务关闭，开启一下，等邮件通知，通知过就会发到手机  
+
+
+现在有智能手机就方便多了，直接报警邮件发给外部一个邮箱，然后在你的手机上下载对应邮箱的app软件就ok了
+现在nagios官方直接都有手机客户端管理软件
+
+================================================================
+
+
+nagiosgraph 让nagios能够图形监控服务动态的状态信息
+
+
+
+nagiosgraph-1.4.4.tar.gz
+
+tar xf nagiosgraph-1.4.4.tar.gz -C /usr/src
+cd /usr/src/nagiosgraph-1.4.4
+
+
+
+[root@li nagiosgraph-1.4.4]# ./install.pl --check-prereq
+checking required PERL modules
+  Carp...1.11
+  CGI...3.51
+  Data::Dumper...2.124
+  File::Basename...2.77
+  File::Find...1.14
+  MIME::Base64...3.08
+  POSIX...1.17
+  RRDs... ***FAIL***			--没有rrd,就算你在rhel6上yum install *rrd*  再来测试也是fail
+  Time::HiRes...1.9721
+checking optional PERL modules
+  GD...fail	--没有gd,yum install *gd* 也不能搞定
+checking nagios installation
+  found nagios at /usr/local/nagios/bin/nagios
+checking web server installation
+  found apache at /usr/sbin/httpd
+
+
+
+安装gd
+
+tar xf libgd-2.1.0.tar.gz -C /usr/src/
+cd /usr/src/libgd-2.1.0/
+./configure ;make ;make install
+echo /usr/local/lib >> /etc/ld.so.conf
+ldconfig
+
+
+
+tar xf GD-2.56.tar.gz -C /usr/src/
+cd /usr/src/GD-2.56/
+perl Build.PL
+./Build
+./Build install
+ldconfig
+
+
+
+
+安装rrdtool
+# tar xf rrdtool-1.4.8.tar.gz -C /usr/src/
+
+# cd /usr/src/rrdtool-1.4.8/
+# ./configure ;make ;make install
+
+# echo /opt/rrdtool-1.4.8/lib > /etc/ld.so.conf.d/rrdtools.conf
+
+# ldconfig
+
+# cd /usr/src/rrdtool-1.4.8/bindings/perl-shared
+# make clean
+# perl Makefile.PL && make && make install
+
+
+
+# cd /usr/src/nagiosgraph-1.4.4/
+
+--再次用下面的命令检测就都OK了
+[root@li nagiosgraph-1.4.4]# ./install.pl --check-prereq
+checking required PERL modules
+  Carp...1.11
+  CGI...3.51
+  Data::Dumper...2.124
+  File::Basename...2.77
+  File::Find...1.14
+  MIME::Base64...3.08
+  POSIX...1.17
+  RRDs...1.4008
+  Time::HiRes...1.9721
+checking optional PERL modules
+  GD...2.56
+checking nagios installation
+  found nagios at /usr/local/nagios/bin/nagios
+checking web server installation
+  found apache at /usr/sbin/httpd
+
+
+------------
+
+
+参考下面这份文档
+http://www.linuxfunda.com/2013/04/02/steps-to-configure-nagiosgraph-with-nagios-core/
+
+
+
+开始安装
+1,
+[root@qianyun nagiosgraph-1.4.4]# ./install.pl --install
+checking required PERL modules
+  Carp...1.11
+  CGI...3.51
+  Data::Dumper...2.124
+  File::Basename...2.77
+  File::Find...1.14
+  MIME::Base64...3.08
+  POSIX...1.17
+  RRDs...1.4008
+  Time::HiRes...1.9721
+checking optional PERL modules
+  GD...2.53
+checking nagios installation
+  found nagios at /usr/local/nagios/bin/nagios
+checking web server installation
+  found apache at /usr/sbin/httpd
+Destination directory (prefix)? [/usr/local/nagiosgraph] 
+Location of configuration files (etc-dir)? [/usr/local/nagiosgraph/etc] 
+Location of executables? [/usr/local/nagiosgraph/bin] 
+Location of CGI scripts? [/usr/local/nagiosgraph/cgi] 
+Location of documentation (doc-dir)? [/usr/local/nagiosgraph/doc] 
+Location of examples? [/usr/local/nagiosgraph/examples] 
+Location of CSS and JavaScript files? [/usr/local/nagiosgraph/share] 
+Location of utilities? [/usr/local/nagiosgraph/util] 
+Location of state files (var-dir)? [/usr/local/nagiosgraph/var] 
+Location of RRD files? [/usr/local/nagiosgraph/var/rrd] 
+Location of log files (log-dir)? [/usr/local/nagiosgraph/var] 
+Path of log file? [/usr/local/nagiosgraph/var/nagiosgraph.log] 
+Path of CGI log file? [/usr/local/nagiosgraph/var/nagiosgraph-cgi.log] 
+URL of CGI scripts? [/nagiosgraph/cgi-bin] 
+URL of CSS file? [/nagiosgraph/nagiosgraph.css] 
+URL of JavaScript file? [/nagiosgraph/nagiosgraph.js] 
+Path of Nagios performance data file? [/tmp/perfdata.log] 
+URL of Nagios CGI scripts? [/nagios/cgi-bin] 
+username or userid of Nagios user? [nagios] 
+username or userid of web server user? [apache] 
+Modify the Nagios configuration? [n] 
+Modify the Apache configuration? [n] 
+configuration:
+  ng_layout            standalone
+  ng_prefix            /usr/local/nagiosgraph
+  ng_etc_dir           /usr/local/nagiosgraph/etc
+  ng_bin_dir           /usr/local/nagiosgraph/bin
+  ng_cgi_dir           /usr/local/nagiosgraph/cgi
+  ng_doc_dir           /usr/local/nagiosgraph/doc
+  ng_examples_dir      /usr/local/nagiosgraph/examples
+  ng_www_dir           /usr/local/nagiosgraph/share
+  ng_util_dir          /usr/local/nagiosgraph/util
+  ng_var_dir           /usr/local/nagiosgraph/var
+  ng_rrd_dir           /usr/local/nagiosgraph/var/rrd
+  ng_log_dir           /usr/local/nagiosgraph/var
+  ng_log_file          /usr/local/nagiosgraph/var/nagiosgraph.log
+  ng_cgilog_file       /usr/local/nagiosgraph/var/nagiosgraph-cgi.log
+  ng_url               /nagiosgraph
+  ng_cgi_url           /nagiosgraph/cgi-bin
+  ng_css_url           /nagiosgraph/nagiosgraph.css
+  ng_js_url            /nagiosgraph/nagiosgraph.js
+  nagios_cgi_url       /nagios/cgi-bin
+  nagios_perfdata_file /tmp/perfdata.log
+  nagios_user          nagios
+  www_user             apache
+  modify_nagios_config n
+  nagios_config_file   
+  nagios_commands_file 
+  modify_apache_config n
+  apache_config_dir    
+  apache_config_file   
+Continue with this configuration? [y] 
+
+.............
+
+2,
+# vim /usr/local/nagios/etc/nagios.cfg	--最后加上下面一段
+
+process_performance_data=1
+service_perfdata_file=/tmp/perfdata.log
+service_perfdata_file_template=$LASTSERVICECHECK$||$HOSTNAME$||$SERVICEDESC$||$SERVICEOUTPUT$||$SERVICEPERFDATA$
+service_perfdata_file_mode=a
+service_perfdata_file_processing_interval=30
+service_perfdata_file_processing_command=process-service-perfdata-for-nagiosgraph
+
+
+3，
+# vim /usr/local/nagios/etc/objects/commands.cfg 	--加上这一段，定义此命令
+
+define command {
+command_name process-service-perfdata-for-nagiosgraph
+command_line /usr/local/nagiosgraph/bin/insert.pl
+}
+
+
+4，
+# vim /etc/httpd/conf/httpd.conf 	--在你的apache里include这个文件
+Include /usr/local/nagiosgraph/etc/nagiosgraph-apache.conf
+
+
+# /etc/init.d/httpd  restart
+# /etc/init.d/nagios  restart
+
+
+5，
+http://10.1.1.9/nagiosgraph/cgi-bin/showconfig.cgi	--用此页面查看信息
+
+# vim /usr/local/nagios/etc/objects/templates.cfg	--加上下面的模版
+
+define service {
+name nagiosgraph
+action_url /nagiosgraph/cgi-bin/show.cgi?host=$HOSTNAME$&service=$SERVICEDESC$
+register 0
+}
+
+6，
+# vim /usr/local/nagios/etc/objects/localhost.cfg   --在你所有的要加图形的监控主机里的服务的use后加上nagiosgraph模版，如下
+define service{
+        use                             local-service,nagiosgraph      
+        host_name                       localhost
+        service_description             PING
+        check_command                   check_ping!100.0,20%!500.0,60%
+        }
+
+
+7，
+# /etc/init.d/nagios restart
+
+最后到你的http://10.1.1.9/nagios/下去查看，会发现只要加了nagiosgraph模版的被监控服务会多了一个图标，按图标就会产生图形
+
