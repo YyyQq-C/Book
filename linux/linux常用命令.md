@@ -11,3 +11,9 @@ PATH=$JAVA_HOME/bin:$HOME/bin:$HOME/.local/bin:$PATH
 * 不限制包数量 `ulimit -c unlimited`
 * 查看具体进程cpu占用 `top -Hp pid`
 * [linux性能检查](https://my.oschina.net/hosee/blog/906955)
+
+
+* 停止指定名称进程  
+``
+kill -9 `pgrep -f ManagerSystem.jar`
+``
